@@ -1,8 +1,14 @@
+import { useState } from 'react'
 import { Link, useParams } from 'react-router'
+import { temPreco, podeComprar } from '../utils/produtos'
+import { formatarPreco } from '../utils/formatarPreco'
 
-export default function PaginaProduto({ produtos, onAdicionar }) {
+export default function PaginaProduto({ produtos, onAdicionar, onRegistrarInteresse }) {
   const { id } = useParams()
   const produto = produtos.find((item) => item.id === id)
+  const [nome, setNome] = useState('')
+  const [email, setEmail] = useState('')
+  const [aviso, setAviso] = useState('')
 
   if (!produto) {
     return (
@@ -15,9 +21,40 @@ export default function PaginaProduto({ produtos, onAdicionar }) {
     )
   }
 
+  const esgotado = !(Number(produto.estoque) > 0)
+
   const relacionados = produtos
-    .filter((item) => item.category === produto.category && item.id !== produto.id)
+    .filter(
+      (item) =>
+        item.category === produto.category &&
+        item.id !== produto.id &&
+        podeComprar(item)
+    )
     .slice(0, 4)
+
+  function enviarAviso(evento) {
+    evento.preventDefault()
+
+    if (!nome.trim() || !email.trim()) {
+      setAviso('Preencha nome e e-mail para receber o aviso.')
+      return
+    }
+
+    const enviado = onRegistrarInteresse({
+      produtoId: produto.id,
+      produtoTitle: produto.title,
+      nome,
+      email,
+    })
+
+    if (enviado) {
+      setAviso('Você entrou na lista de espera. Vamos avisar quando o produto voltar.')
+      setNome('')
+      setEmail('')
+    } else {
+      setAviso('Não foi possível salvar seu interesse. Tente novamente.')
+    }
+  }
 
   return (
     <section>
@@ -37,17 +74,52 @@ export default function PaginaProduto({ produtos, onAdicionar }) {
           <p className="card-avaliacao">
             ★ {produto.rating.rate} <span>({produto.rating.count} avaliações)</span>
           </p>
-          <p className="detalhe-preco">R$ {produto.price.toFixed(2).replace('.', ',')}</p>
+          <p className="detalhe-preco">{temPreco(produto) ? formatarPreco(produto.price) : 'Preço a definir'}</p>
           <p className="detalhe-descricao">{produto.description}</p>
-          <p className="detalhe-estoque">{produto.estoque} unidades disponíveis</p>
+          <p className="detalhe-estoque">
+            {produto.estoque > 0 ? `${produto.estoque} unidades disponíveis` : 'Produto esgotado'}
+          </p>
 
           <button
             className="botao botao-grande"
             onClick={() => onAdicionar(produto)}
-            disabled={produto.estoque === 0}
+            disabled={!podeComprar(produto)}
           >
-            Adicionar ao carrinho
+            {esgotado ? 'Indisponível no momento' : !temPreco(produto) ? 'Aguardando preço' : 'Adicionar ao carrinho'}
           </button>
+
+          {esgotado && (
+            <form className="form-aviso" onSubmit={enviarAviso}>
+              <h2>Avise-me quando voltar</h2>
+              <label>
+                <span>Nome</span>
+                <input
+                  type="text"
+                  required
+                  value={nome}
+                  onChange={(evento) => setNome(evento.target.value)}
+                  placeholder="Seu nome"
+                />
+              </label>
+
+              <label>
+                <span>E-mail</span>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(evento) => setEmail(evento.target.value)}
+                  placeholder="seu@email.com"
+                />
+              </label>
+
+              <button className="botao botao-secundario" type="submit">
+                Quero receber o aviso
+              </button>
+
+              {aviso && <p className="mensagem-aviso">{aviso}</p>}
+            </form>
+          )}
 
           <ul className="detalhe-garantias">
             <li>Troca grátis em até 30 dias</li>

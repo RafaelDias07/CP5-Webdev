@@ -7,8 +7,11 @@ import Loja from './pages/Loja'
 import PaginaProduto from './pages/PaginaProduto'
 import Carrinho from './pages/Carrinho'
 import Estoque from './pages/Estoque'
+import PainelLojista, { LoginLojista } from './pages/PainelLojista'
 import { buscarProdutos } from './services/produtos'
 import { buscarClientes } from './services/clientes'
+import { CHAVE_LISTA_ESPERA, carregarListaEspera, salvarInteresse } from './services/listaEspera'
+import { podeComprar } from './utils/produtos'
 
 export default function App() {
   const [produtos, setProdutos] = useState([])
@@ -17,6 +20,21 @@ export default function App() {
   const [carrinho, setCarrinho] = useState([])
   const [clientes, setClientes] = useState([])
   const [clienteAtualId, setClienteAtualId] = useState(null)
+  const [mensagemCarrinho, setMensagemCarrinho] = useState('')
+  const [adminLogado, setAdminLogado] = useState(false)
+  const [listaEspera, setListaEspera] = useState(carregarListaEspera)
+
+  const produtosDisponiveis = produtos.filter(podeComprar)
+
+  useEffect(() => {
+    function sincronizarLista(evento) {
+      if (evento.key === CHAVE_LISTA_ESPERA || evento.key === null) {
+        setListaEspera(carregarListaEspera())
+      }
+    }
+    window.addEventListener('storage', sincronizarLista)
+    return () => window.removeEventListener('storage', sincronizarLista)
+  }, [])
 
   useEffect(() => {
     buscarProdutos()
@@ -30,30 +48,65 @@ export default function App() {
     })
   }, [])
 
+  useEffect(() => {
+    if (!mensagemCarrinho) return
+
+    const temporizador = setTimeout(() => setMensagemCarrinho(''), 2200)
+    return () => clearTimeout(temporizador)
+  }, [mensagemCarrinho])
+
   function adicionarAoCarrinho(produto) {
-    setCarrinho(carrinho.concat(produto))
+    if (!podeComprar(produto)) return
+
+    setCarrinho((carrinhoAtual) => carrinhoAtual.concat(produto))
+    setMensagemCarrinho(`${produto.title} adicionado ao carrinho.`)
   }
 
   function removerUmaUnidade(produtoId) {
-    // Remove só a primeira unidade encontrada do produto
-    let removido = false
-    setCarrinho(
-      carrinho.filter((produto) => {
-        if (!removido && produto.id === produtoId) {
-          removido = true
-          return false
-        }
-        return true
-      })
-    )
+    setCarrinho((carrinhoAtual) => {
+      const indice = carrinhoAtual.findIndex((produto) => produto.id === produtoId)
+
+      if (indice === -1) {
+        return carrinhoAtual
+      }
+
+      return carrinhoAtual.filter((produto, index) => index !== indice)
+    })
   }
 
   const clienteAtual = clientes.find((cliente) => cliente.id === clienteAtualId)
 
+  function registrarInteresse({ produtoId, nome, email }) {
+    if (!produtoId || !nome?.trim() || !email?.trim()) {
+      return false
+    }
+
+    const produto = produtos.find((item) => item.id === produtoId)
+    if (!produto || Number(produto.estoque) > 0) return false
+
+    try {
+      const atualizada = salvarInteresse({
+        id: `${produtoId}-${Date.now()}`,
+        produtoId,
+        produtoTitle: produto.title,
+        nome: nome.trim(),
+        email: email.trim().toLowerCase(),
+      })
+      setListaEspera(atualizada)
+    } catch {
+      return false
+    }
+
+    return true
+  }
+
   return (
     <div className="app">
       <RolarParaTopo />
-      <Header carrinho={carrinho} clienteAtual={clienteAtual} />
+
+      {mensagemCarrinho && <div className="mensagem-carrinho">{mensagemCarrinho}</div>}
+
+      <Header carrinho={carrinho} clienteAtual={clienteAtual} adminLogado={adminLogado} />
 
       <main className="conteudo">
         {carregando && <p className="aviso">Carregando produtos...</p>}
@@ -63,25 +116,41 @@ export default function App() {
           <Routes>
             <Route
               path="/"
-              element={<Loja produtos={produtos} onAdicionar={adicionarAoCarrinho} />}
+              element={<Loja produtos={produtosDisponiveis} onAdicionar={adicionarAoCarrinho} />}
             />
             <Route
               path="/produto/:id"
-              element={<PaginaProduto produtos={produtos} onAdicionar={adicionarAoCarrinho} />}
+              element={
+                <PaginaProduto
+                  produtos={produtos}
+                  onAdicionar={adicionarAoCarrinho}
+                  onRegistrarInteresse={registrarInteresse}
+                />
+              }
             />
             <Route
               path="/carrinho"
               element={
                 <Carrinho
                   carrinho={carrinho}
-                  produtos={produtos}
+                  produtos={produtosDisponiveis}
                   clienteAtual={clienteAtual}
                   onAdicionar={adicionarAoCarrinho}
                   onRemover={removerUmaUnidade}
                 />
               }
             />
-            <Route path="/estoque" element={<Estoque produtos={produtos} />} />
+            <Route path="/estoque" element={<Estoque produtos={produtos} listaEspera={listaEspera} />} />
+            <Route
+              path="/admin"
+              element={
+                adminLogado ? (
+                  <PainelLojista produtos={produtos} listaEspera={listaEspera} />
+                ) : (
+                  <LoginLojista onLogin={() => setAdminLogado(true)} />
+                )
+              }
+            />
           </Routes>
         )}
       </main>
